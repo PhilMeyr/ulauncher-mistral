@@ -1,4 +1,4 @@
-"""Fabriques centralisées de `Result` Ulauncher (DRY : icônes, actions, mise en forme)."""
+"""Centralized `Result` factories (DRY: icons, actions, formatting)."""
 
 from __future__ import annotations
 
@@ -17,20 +17,20 @@ _API_KEYS_URL = "https://console.mistral.ai/api-keys"
 
 
 def _copy_effect(text: str) -> dict[str, Any]:
-    """Effet « copier dans le presse-papiers » (format legacy, toujours supporté en v3)."""
+    """Copy-to-clipboard effect (legacy format, still supported in API v3)."""
     return {"type": "effect:legacy_copy", "data": text}
 
 
 def ask_item(question: str, model: str) -> Result:
     return command_item(
-        name=f"Demander à Mistral : « {question} »",
-        description=f"Entrée pour envoyer — modèle : {model}",
+        name=f'Ask Mistral: "{question}"',
+        description=f"Press Enter to send — model: {model}",
         data={"command": "ask", "query": question},
     )
 
 
 def command_item(name: str, description: str, data: dict[str, Any]) -> Result:
-    """Item qui déclenche une commande de l'extension à l'activation."""
+    """Item that triggers an extension command when activated."""
     return Result(
         name=name,
         description=description,
@@ -42,18 +42,18 @@ def command_item(name: str, description: str, data: dict[str, Any]) -> Result:
 def help_items() -> list[Result]:
     return [
         Result(
-            name="Posez votre question après le mot-clé",
-            description="Sous-commandes : model (choix du modèle), reset (vider l'historique)",
+            name="Type your question after the keyword",
+            description="Subcommands: model (pick the model), reset (clear the history)",
             icon=ICON,
         ),
     ]
 
 
 def answer_results(answer: str, model: str) -> list[Result]:
-    """Réponse complète : en-tête copiable, corps ligne par ligne, liens cliquables."""
+    """Full answer: copyable header, body line by line, clickable links."""
     results = [
         Result(
-            name=f"Réponse ({model}) — Entrée pour copier",
+            name=f"Answer ({model}) — press Enter to copy",
             icon=ICON,
             on_enter=_copy_effect(answer),
         )
@@ -93,15 +93,15 @@ def confirmation(message: str) -> list[Result]:
 
 
 def error_results(error: MistralError, retry_data: dict[str, Any] | None = None) -> list[Result]:
-    """Toute erreur devient un item visible, jamais d'échec silencieux."""
-    results = [Result(name="⚠️ Erreur", description=error.user_message, icon=ICON)]
+    """Every error becomes a visible item — never a silent failure."""
+    results = [Result(name="⚠️ Error", description=error.user_message, icon=ICON)]
     if isinstance(error, ApiKeyMissingError) or (
         isinstance(error, ApiError) and error.status == 401
     ):
         results.append(
             Result(
                 compact=True,
-                name="🔑 Ouvrir la console Mistral pour créer/vérifier une clé API",
+                name="🔑 Open the Mistral console to create/check an API key",
                 icon=ICON,
                 on_enter=effects.open(_API_KEYS_URL),
             )
@@ -110,7 +110,7 @@ def error_results(error: MistralError, retry_data: dict[str, Any] | None = None)
         results.append(
             Result(
                 compact=True,
-                name="↻ Réessayer",
+                name="↻ Retry",
                 icon=ICON,
                 on_enter=ExtensionCustomAction(retry_data, keep_app_open=True),
             )

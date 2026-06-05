@@ -3,50 +3,50 @@
   "name": "Mistral AI",
   "authors": "Philippe Meyralbe",
   "icon": "images/icon.png",
-  "instructions": "Créez une clé API sur https://console.mistral.ai/api-keys puis renseignez-la dans les préférences ci-dessous.",
+  "instructions": "Create an API key at https://console.mistral.ai/api-keys then set it in the preferences below.",
   "triggers": {
     "mistral": {
       "name": "Mistral AI",
-      "description": "Poser une question à Mistral AI (« model » pour choisir le modèle, « reset » pour vider l'historique)",
+      "description": "Ask Mistral AI a question (\"model\" to pick the model, \"reset\" to clear the history)",
       "default_keyword": "ai"
     }
   },
   "preferences": {
     "api_key": {
       "type": "input",
-      "name": "Clé API Mistral",
-      "description": "Clé créée sur console.mistral.ai",
+      "name": "Mistral API key",
+      "description": "Key created at console.mistral.ai",
       "default_value": ""
     },
     "default_model": {
       "type": "input",
-      "name": "Modèle par défaut",
-      "description": "Surchargé par le choix fait via la sous-commande « model »",
+      "name": "Default model",
+      "description": "Overridden by the choice made via the \"model\" subcommand",
       "default_value": "mistral-small-latest"
     },
     "system_prompt": {
       "type": "text",
       "name": "System prompt",
-      "description": "Instructions données à Mistral pour chaque conversation",
-      "default_value": "Réponds de façon concise."
+      "description": "Instructions given to Mistral for every conversation",
+      "default_value": "Answer concisely."
     },
     "history_size": {
       "type": "number",
-      "name": "Taille de l'historique",
-      "description": "Nombre d'échanges gardés comme contexte (0 = désactivé)",
+      "name": "History size",
+      "description": "Number of exchanges kept as context (0 = disabled)",
       "default_value": 4,
       "min": 0,
       "max": 20
     },
     "max_tokens": {
       "type": "number",
-      "name": "Tokens max par réponse",
+      "name": "Max tokens per answer",
       "default_value": 1024,
       "min": 1
     },
     "timeout": {
       "type": "number",
-      "name": "Timeout API (secondes)",
+      "name": "API timeout (seconds)",
       "default_value": 30,
       "min": 5,
       "max": 300

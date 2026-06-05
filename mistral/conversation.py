@@ -1,4 +1,4 @@
-"""Historique de conversation multi-tours, persisté via StateStore."""
+"""Multi-turn conversation history, persisted via StateStore."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ _STATE_KEY = "history"
 
 
 class ConversationHistory:
-    """Fenêtre glissante des derniers échanges, envoyée comme contexte à Mistral."""
+    """Sliding window of the latest exchanges, sent as context to Mistral."""
 
     def __init__(self, store: StateStore, max_exchanges: int) -> None:
         self._store = store
         self._max_exchanges = max_exchanges
 
     def as_messages(self) -> list[Message]:
-        """Messages user/assistant des N derniers échanges, prêts pour l'API."""
+        """User/assistant messages of the last N exchanges, ready for the API."""
         if self._max_exchanges <= 0:
             return []
         exchanges: list[list[str]] = self._store.get(_STATE_KEY, [])

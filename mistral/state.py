@@ -1,4 +1,4 @@
-"""Persistance JSON de l'état de l'extension (modèle choisi, historique de conversation)."""
+"""JSON persistence of the extension state (chosen model, conversation history)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def _default_path() -> Path:
 
 
 class StateStore:
-    """Petit magasin clé/valeur persisté en JSON, avec écriture atomique."""
+    """Small key/value store persisted as JSON, with atomic writes."""
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _default_path()

@@ -1,4 +1,4 @@
-"""Mise en forme des réponses pour l'affichage en items Ulauncher (une ligne par item)."""
+"""Formatting of answers for display as Ulauncher items (one line per item)."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import textwrap
 
 LINE_WIDTH = 90
 
-# URLs http(s), en excluant la ponctuation finale et les fermetures markdown.
+# http(s) URLs, excluding trailing punctuation and markdown closers.
 _URL_PATTERN = re.compile(r"https?://[^\s<>\)\]]+")
 
 
 def wrap_lines(text: str, width: int = LINE_WIDTH) -> list[str]:
-    """Découpe le texte en lignes courtes en respectant mots et paragraphes."""
+    """Split the text into short lines, preserving words and paragraphs."""
     lines: list[str] = []
     for paragraph in text.splitlines():
         stripped = paragraph.strip()
@@ -23,7 +23,7 @@ def wrap_lines(text: str, width: int = LINE_WIDTH) -> list[str]:
 
 
 def extract_urls(text: str) -> list[str]:
-    """URLs uniques trouvées dans la réponse, dans leur ordre d'apparition."""
+    """Unique URLs found in the answer, in order of appearance."""
     urls: list[str] = []
     for match in _URL_PATTERN.findall(text):
         url = match.rstrip(".,;:!?'\"")

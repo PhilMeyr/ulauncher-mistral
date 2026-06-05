@@ -1,1 +1,1 @@
-"""Couche de présentation Ulauncher : fabriques de Result et commandes."""
+"""Ulauncher presentation layer: Result factories and commands."""

@@ -1,1 +1,1 @@
-"""Logique métier de l'extension : client API Mistral, historique, état, formatage."""
+"""Extension business logic: Mistral API client, history, state, formatting."""

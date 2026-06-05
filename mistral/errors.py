@@ -1,12 +1,12 @@
-"""Exceptions typées de l'extension, avec un message destiné à l'utilisateur."""
+"""Typed extension exceptions, each carrying a user-facing message."""
 
 from __future__ import annotations
 
 
 class MistralError(Exception):
-    """Base de toutes les erreurs de l'extension."""
+    """Base class for all extension errors."""
 
-    user_message: str = "Une erreur inattendue est survenue."
+    user_message: str = "An unexpected error occurred."
 
     def __init__(self, user_message: str | None = None) -> None:
         if user_message is not None:
@@ -15,29 +15,29 @@ class MistralError(Exception):
 
 
 class ApiKeyMissingError(MistralError):
-    user_message = "Aucune clé API configurée. Ajoutez-la dans les préférences de l'extension."
+    user_message = "No API key configured. Add it in the extension preferences."
 
 
 class ApiError(MistralError):
-    """Erreur HTTP renvoyée par l'API Mistral."""
+    """HTTP error returned by the Mistral API."""
 
     def __init__(self, status: int, detail: str = "") -> None:
         self.status = status
         self.detail = detail
         messages = {
-            401: "Clé API invalide ou révoquée. Vérifiez-la dans les préférences.",
-            403: "Accès refusé par l'API Mistral (permissions de la clé ?).",
-            429: "Limite de débit atteinte. Réessayez dans quelques instants.",
+            401: "Invalid or revoked API key. Check it in the preferences.",
+            403: "Access denied by the Mistral API (key permissions?).",
+            429: "Rate limit reached. Try again in a few moments.",
         }
-        message = messages.get(status, f"L'API Mistral a renvoyé une erreur HTTP {status}.")
+        message = messages.get(status, f"The Mistral API returned HTTP error {status}.")
         if detail and status not in messages:
             message = f"{message} {detail}"
         super().__init__(message)
 
 
 class ApiTimeoutError(MistralError):
-    user_message = "L'API Mistral n'a pas répondu à temps. Réessayez ou augmentez le timeout."
+    user_message = "The Mistral API did not respond in time. Retry or increase the timeout."
 
 
 class NetworkError(MistralError):
-    user_message = "Impossible de joindre l'API Mistral. Vérifiez votre connexion réseau."
+    user_message = "Could not reach the Mistral API. Check your network connection."

@@ -1,4 +1,4 @@
-"""Client HTTP minimal pour l'API Mistral (stdlib uniquement, aucune dépendance)."""
+"""Minimal HTTP client for the Mistral API (stdlib only, zero dependencies)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ Message = dict[str, str]  # {"role": ..., "content": ...}
 
 
 class ChatProvider(Protocol):
-    """Interface dont dépendent les commandes (DIP) — permet de changer de backend."""
+    """Interface the commands depend on (DIP) — allows swapping the backend."""
 
     def chat(self, messages: list[Message], model: str, max_tokens: int) -> str: ...
 
@@ -31,7 +31,7 @@ class ChatProvider(Protocol):
 
 
 class MistralClient:
-    """Implémentation `ChatProvider` au-dessus de l'API REST Mistral via urllib."""
+    """`ChatProvider` implementation on top of the Mistral REST API via urllib."""
 
     def __init__(self, api_key: str, timeout: float = 30.0) -> None:
         if not api_key:
@@ -39,7 +39,7 @@ class MistralClient:
         self._api_key = api_key
         self._timeout = timeout
 
-    # -- API publique -----------------------------------------------------
+    # -- Public API ---------------------------------------------------------
 
     def chat(self, messages: list[Message], model: str, max_tokens: int) -> str:
         payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
@@ -47,7 +47,7 @@ class MistralClient:
         return data["choices"][0]["message"]["content"]
 
     def chat_stream(self, messages: list[Message], model: str, max_tokens: int) -> Iterator[str]:
-        """Itère sur les deltas de texte renvoyés en SSE (`stream: true`)."""
+        """Iterate over the text deltas returned as SSE (`stream: true`)."""
         payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
         with self._open("POST", "/chat/completions", payload) as response:
             for raw_line in response:
@@ -65,7 +65,7 @@ class MistralClient:
         data = self._request_json("GET", "/models")
         return sorted({entry["id"] for entry in data["data"]})
 
-    # -- Interne ----------------------------------------------------------
+    # -- Internal -------------------------------------------------------------
 
     def _open(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         request = urllib.request.Request(

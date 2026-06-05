@@ -1,11 +1,9 @@
-"""Commandes de l'extension (registre ouvert : en ajouter une = une entrée de dict)."""
+"""Extension commands (open registry: adding a command = adding a dict entry)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
-
-from ulauncher.internals.result import Result
 
 from mistral.client import MistralClient
 from mistral.conversation import ConversationHistory
@@ -14,6 +12,8 @@ from mistral.state import StateStore
 from ui import results
 
 if TYPE_CHECKING:
+    from ulauncher.internals.result import Result
+
     from mistral.client import ChatProvider, Message
 
 _MODEL_STATE_KEY = "model"
@@ -21,7 +21,7 @@ _MODEL_STATE_KEY = "model"
 
 @dataclass
 class Context:
-    """Dépendances et réglages injectés dans les commandes (construits par main.py)."""
+    """Dependencies and settings injected into commands (built by main.py)."""
 
     api_key: str
     default_model: str
@@ -33,7 +33,7 @@ class Context:
 
     @property
     def model(self) -> str:
-        """Modèle actif : le choix fait via « model » prime sur la préférence."""
+        """Active model: the choice made via the "model" command overrides the preference."""
         return self.store.get(_MODEL_STATE_KEY) or self.default_model
 
     def client(self) -> ChatProvider:
@@ -44,7 +44,7 @@ class Context:
 
 
 class Command(Protocol):
-    """Une commande propose des items pendant la frappe puis s'exécute à l'activation."""
+    """A command suggests items while typing, then executes when activated."""
 
     def suggest(self, ctx: Context, args: str) -> list[Result]: ...
 
@@ -72,8 +72,8 @@ class ModelCommand:
     def suggest(self, ctx: Context, args: str) -> list[Result]:
         return [
             results.command_item(
-                name="Choisir le modèle Mistral",
-                description=f"Modèle actif : {ctx.model} — Entrée pour lister les modèles",
+                name="Pick the Mistral model",
+                description=f"Active model: {ctx.model} — press Enter to list models",
                 data={"command": "model"},
             )
         ]
@@ -84,36 +84,36 @@ class ModelCommand:
 
 
 class SetModelCommand:
-    def suggest(self, ctx: Context, args: str) -> list[Result]:  # jamais suggérée directement
+    def suggest(self, ctx: Context, args: str) -> list[Result]:  # never suggested directly
         return []
 
     def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
         ctx.store.set(_MODEL_STATE_KEY, data["model"])
-        return results.confirmation(f"✓ Modèle actif : {data['model']}")
+        return results.confirmation(f"✓ Active model: {data['model']}")
 
 
 class ResetCommand:
     def suggest(self, ctx: Context, args: str) -> list[Result]:
         return [
             results.command_item(
-                name="Vider l'historique de conversation",
-                description="Entrée pour repartir d'une conversation vierge",
+                name="Clear the conversation history",
+                description="Press Enter to start from a blank conversation",
                 data={"command": "reset"},
             )
         ]
 
     def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
         ctx.history().clear()
-        return results.confirmation("✓ Historique de conversation vidé")
+        return results.confirmation("✓ Conversation history cleared")
 
 
-#: Sous-commandes accessibles en tapant leur nom après le mot-clé.
+#: Subcommands reachable by typing their name after the keyword.
 SUBCOMMANDS: dict[str, Command] = {
     "model": ModelCommand(),
     "reset": ResetCommand(),
 }
 
-#: Toutes les commandes activables (routées par data["command"] dans on_item_enter).
+#: Every activatable command (routed by data["command"] in on_item_enter).
 COMMANDS: dict[str, Command] = {
     "ask": AskCommand(),
     "model:set": SetModelCommand(),
@@ -124,7 +124,7 @@ DEFAULT_COMMAND: Command = COMMANDS["ask"]
 
 
 def suggest(ctx: Context, query: str) -> list[Result]:
-    """Routage de la frappe : sous-commande exacte ou question par défaut."""
+    """Route typed input: exact subcommand match, or a question by default."""
     stripped = query.strip()
     command = SUBCOMMANDS.get(stripped.lower())
     if command is not None:
@@ -133,7 +133,7 @@ def suggest(ctx: Context, query: str) -> list[Result]:
 
 
 def activate(ctx: Context, data: dict[str, Any]) -> list[Result]:
-    """Routage d'une activation, avec gestion d'erreurs uniforme (item + réessayer)."""
+    """Route an activation, with uniform error handling (error item + retry)."""
     command = COMMANDS.get(data.get("command", ""))
     if command is None:
         return results.help_items()
