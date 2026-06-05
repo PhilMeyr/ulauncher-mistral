@@ -33,6 +33,13 @@ class ChatAnswer(NamedTuple):
     truncated: bool  # the API stopped at max_tokens (finish_reason == "length")
 
 
+class StreamChunk(NamedTuple):
+    """One SSE chunk from `chat_stream`; `truncated` mirrors `ChatAnswer.truncated`."""
+
+    delta: str
+    truncated: bool  # this chunk carried finish_reason == "length"
+
+
 @contextmanager
 def _translating_errors() -> Iterator[None]:
     """Single point translating every transport/parsing failure into a MistralError.
@@ -83,8 +90,13 @@ class MistralClient:
             raise ApiResponseError
         return ChatAnswer(content=content, truncated=finish_reason == "length")
 
-    def chat_stream(self, messages: list[Message], model: str, max_tokens: int) -> Iterator[str]:
-        """Iterate over the text deltas returned as SSE (`stream: true`)."""
+    def chat_stream(
+        self, messages: list[Message], model: str, max_tokens: int
+    ) -> Iterator[StreamChunk]:
+        """Iterate over the text deltas returned as SSE (`stream: true`).
+
+        The final SSE chunk usually carries `finish_reason` with no content; it is
+        yielded too (empty delta) so the truncation fact reaches the caller."""
         payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
         with _translating_errors(), self._open("POST", "/chat/completions", payload) as response:
             for raw_line in response:
@@ -94,9 +106,11 @@ class MistralClient:
                 chunk = line[len("data:") :].strip()
                 if chunk == "[DONE]":
                     break
-                delta = json.loads(chunk)["choices"][0]["delta"].get("content")
-                if delta:
-                    yield delta
+                choice = json.loads(chunk)["choices"][0]
+                delta = choice["delta"].get("content")
+                finish_reason = choice.get("finish_reason")
+                if delta or finish_reason:
+                    yield StreamChunk(delta=delta or "", truncated=finish_reason == "length")
 
     def list_models(self) -> list[str]:
         data = self._request_json("GET", "/models")

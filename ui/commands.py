@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Union
+from typing import TYPE_CHECKING, Any, Callable, Union
 
 from mistral.client import MistralClient
 from mistral.conversation import ConversationHistory
@@ -103,14 +104,18 @@ def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
     """Yield the growing answer as it streams; errors must be handled here because
     they are raised during iteration, outside the activate() error wrapper."""
     answer = ""
+    truncated = False
     retry_data = {"command": "ask", "query": question}
     try:
         try:
-            deltas = ctx.client().chat_stream(
+            chunks = ctx.client().chat_stream(
                 _build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
             )
-            for delta in deltas:
-                answer += delta
+            for chunk in chunks:
+                truncated |= chunk.truncated
+                if not chunk.delta:  # final finish_reason-only chunk: nothing new to render
+                    continue
+                answer += chunk.delta
                 yield results.answer_results(ctx.t, answer, ctx.model, partial=True)
         except MistralError as error:
             yield results.error_results(ctx.t, error, retry_data=retry_data)
@@ -120,7 +125,7 @@ def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
             yield results.error_results(ctx.t, MistralError(), retry_data=retry_data)
             return
         _record_answer(ctx, question, answer)
-        yield results.answer_results(ctx.t, answer, ctx.model)
+        yield results.answer_results(ctx.t, answer, ctx.model, truncated=truncated)
     finally:
         _end_request(question)
 
@@ -195,9 +200,10 @@ def _activate_reset(ctx: Context, data: dict[str, Any]) -> list[Result]:
 
 def _suggest_last(ctx: Context, args: str) -> list[Result]:
     last = ctx.store.get(_LAST_ANSWER_STATE_KEY)
-    if not last:
+    answer = last.get("answer") if isinstance(last, dict) else None
+    if not answer:  # never stored, or corrupted/hand-edited state file
         return results.notice(ctx.t("last.empty"))
-    return results.answer_results(ctx.t, last["answer"], last["model"])
+    return results.answer_results(ctx.t, answer, last.get("model", ctx.model))
 
 
 # -- Registries and routers --------------------------------------------------
@@ -221,8 +227,26 @@ ACTIVATE: dict[str, ActivateFn] = {
 }
 
 
-def suggest(ctx: Context, query: str) -> list[Result]:
-    """Route typed input: exact subcommand match, or a question by default."""
+def _guarded(
+    ctx: Context,
+    label: str,
+    run: Callable[[], CommandOutput],
+    retry_data: dict[str, Any] | None = None,
+) -> CommandOutput:
+    """Last resort: every exception becomes a visible error item.
+
+    The framework runs both routers in a bare thread with no exception handler,
+    so this single wrapper is what guarantees "never a silent failure"."""
+    try:
+        return run()
+    except MistralError as error:
+        return results.error_results(ctx.t, error, retry_data=retry_data)
+    except Exception:
+        logger.exception("Unexpected error while %s", label)
+        return results.error_results(ctx.t, MistralError(), retry_data=retry_data)
+
+
+def _route_suggest(ctx: Context, query: str) -> list[Result]:
     stripped = query.strip()
     subcommand = SUGGEST.get(stripped.lower())
     if subcommand is not None:
@@ -230,18 +254,18 @@ def suggest(ctx: Context, query: str) -> list[Result]:
     return _suggest_ask(ctx, stripped)
 
 
-def activate(ctx: Context, data: dict[str, Any]) -> CommandOutput:
-    """Route an activation, with uniform error handling (error item + retry).
+def suggest(ctx: Context, query: str) -> list[Result]:
+    """Route typed input: exact subcommand match, or a question by default.
 
-    The framework runs this in a bare thread with no exception handler, so the
-    last-resort except below is what guarantees "never a silent failure"."""
+    No retry item while typing — the next keystroke re-runs the suggestion."""
+    return _guarded(ctx, "suggesting", lambda: _route_suggest(ctx, query))
+
+
+def activate(ctx: Context, data: dict[str, Any]) -> CommandOutput:
+    """Route an activation, with uniform error handling (error item + retry)."""
     handler = ACTIVATE.get(data.get("command", ""))
     if handler is None:
         return results.help_items(ctx.t)
-    try:
-        return handler(ctx, data)
-    except MistralError as error:
-        return results.error_results(ctx.t, error, retry_data=data)
-    except Exception:
-        logger.exception("Unexpected error while handling %r", data.get("command"))
-        return results.error_results(ctx.t, MistralError(), retry_data=data)
+    return _guarded(
+        ctx, f"handling {data.get('command')!r}", lambda: handler(ctx, data), retry_data=data
+    )
