@@ -15,13 +15,11 @@
 
 ## Installation
 
-1. Install Ulauncher v6 (beta): download the `.deb` from the [releases page](https://github.com/Ulauncher/Ulauncher/releases) then `sudo apt install ./ulauncher_6.0.0.betaXX_all.deb gir1.2-gtklayershell-0.1`.
-2. Install the extension:
-   ```bash
-   ln -s /path/to/ulauncher-mistral \
-     ~/.local/share/ulauncher/extensions/com.github.philmeyr.ulauncher-mistral
+1. Install Ulauncher v6: go to the [official download page](https://ulauncher.io/#Download), select **v6**, and run the command recommended for your distribution.
+2. Install the extension: open Ulauncher **Preferences → Extensions → Add extension**, then paste this repository's URL:
    ```
-   then restart Ulauncher.
+   https://github.com/PhilMeyr/ulauncher-mistral
+   ```
 3. Create an API key at <https://console.mistral.ai/api-keys> and set it in the extension preferences.
 
 ## Preferences
