@@ -1,0 +1,55 @@
+{
+  "api_version": "3",
+  "name": "Mistral AI",
+  "authors": "Philippe Meyralbe",
+  "icon": "images/icon.png",
+  "instructions": "Créez une clé API sur https://console.mistral.ai/api-keys puis renseignez-la dans les préférences ci-dessous.",
+  "triggers": {
+    "mistral": {
+      "name": "Mistral AI",
+      "description": "Poser une question à Mistral AI (« model » pour choisir le modèle, « reset » pour vider l'historique)",
+      "default_keyword": "ai"
+    }
+  },
+  "preferences": {
+    "api_key": {
+      "type": "input",
+      "name": "Clé API Mistral",
+      "description": "Clé créée sur console.mistral.ai",
+      "default_value": ""
+    },
+    "default_model": {
+      "type": "input",
+      "name": "Modèle par défaut",
+      "description": "Surchargé par le choix fait via la sous-commande « model »",
+      "default_value": "mistral-small-latest"
+    },
+    "system_prompt": {
+      "type": "text",
+      "name": "System prompt",
+      "description": "Instructions données à Mistral pour chaque conversation",
+      "default_value": "Réponds de façon concise."
+    },
+    "history_size": {
+      "type": "number",
+      "name": "Taille de l'historique",
+      "description": "Nombre d'échanges gardés comme contexte (0 = désactivé)",
+      "default_value": 4,
+      "min": 0,
+      "max": 20
+    },
+    "max_tokens": {
+      "type": "number",
+      "name": "Tokens max par réponse",
+      "default_value": 1024,
+      "min": 1
+    },
+    "timeout": {
+      "type": "number",
+      "name": "Timeout API (secondes)",
+      "default_value": 30,
+      "min": 5,
+      "max": 300
+    }
+  }
+}
