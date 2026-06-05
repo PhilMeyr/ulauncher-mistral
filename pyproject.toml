@@ -1,7 +1,8 @@
 [project]
 name = "ulauncher-mistral"
-version = "1.0.0"
-description = "Extension Ulauncher (v6 / API v3) pour interroger Mistral AI"
+version = "0.1.0"
+description = "Ulauncher (v6 / API v3) extension to query Mistral AI"
+license = { text = "MIT" }
 requires-python = ">=3.8"
 
 [tool.ruff]
