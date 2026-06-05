@@ -1,4 +1,8 @@
-"""Typed extension exceptions, each carrying a user-facing message."""
+"""Typed extension exceptions.
+
+Each error carries a language-neutral message key (translated by the UI layer)
+and the parameters needed to format it.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +10,15 @@ from __future__ import annotations
 class MistralError(Exception):
     """Base class for all extension errors."""
 
-    user_message: str = "An unexpected error occurred."
+    message_key: str = "error.unexpected"
 
-    def __init__(self, user_message: str | None = None) -> None:
-        if user_message is not None:
-            self.user_message = user_message
-        super().__init__(self.user_message)
+    def __init__(self, **params: object) -> None:
+        self.params = params
+        super().__init__(f"{self.message_key} {params}".strip())
 
 
 class ApiKeyMissingError(MistralError):
-    user_message = "No API key configured. Add it in the extension preferences."
+    message_key = "error.api_key_missing"
 
 
 class ApiError(MistralError):
@@ -23,21 +26,16 @@ class ApiError(MistralError):
 
     def __init__(self, status: int, detail: str = "") -> None:
         self.status = status
-        self.detail = detail
-        messages = {
-            401: "Invalid or revoked API key. Check it in the preferences.",
-            403: "Access denied by the Mistral API (key permissions?).",
-            429: "Rate limit reached. Try again in a few moments.",
-        }
-        message = messages.get(status, f"The Mistral API returned HTTP error {status}.")
-        if detail and status not in messages:
-            message = f"{message} {detail}"
-        super().__init__(message)
+        keys = {401: "error.api_401", 403: "error.api_403", 429: "error.api_429"}
+        self.message_key = keys.get(status, "error.api_http")
+        # Only the generic message includes the raw detail returned by the API.
+        generic = self.message_key == "error.api_http"
+        super().__init__(status=status, detail=detail if generic else "")
 
 
 class ApiTimeoutError(MistralError):
-    user_message = "The Mistral API did not respond in time. Retry or increase the timeout."
+    message_key = "error.timeout"
 
 
 class NetworkError(MistralError):
-    user_message = "Could not reach the Mistral API. Check your network connection."
+    message_key = "error.network"

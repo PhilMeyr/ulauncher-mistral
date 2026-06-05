@@ -47,6 +47,7 @@ class MistralExtension(Extension):
             history_size=int(prefs.get("history_size", 4)),
             max_tokens=int(prefs.get("max_tokens", 1024)),
             timeout=int(prefs.get("timeout", 30)),
+            language=str(prefs.get("language", "en")),
         )
 
 

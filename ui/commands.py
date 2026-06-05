@@ -10,6 +10,7 @@ from mistral.conversation import ConversationHistory
 from mistral.errors import MistralError
 from mistral.state import StateStore
 from ui import results
+from ui.strings import Translator
 
 if TYPE_CHECKING:
     from ulauncher.internals.result import Result
@@ -29,7 +30,12 @@ class Context:
     history_size: int
     max_tokens: int
     timeout: int
+    language: str = "en"
     store: StateStore = field(default_factory=StateStore)
+
+    @property
+    def t(self) -> Translator:
+        return Translator(self.language)
 
     @property
     def model(self) -> str:
@@ -54,8 +60,8 @@ class Command(Protocol):
 class AskCommand:
     def suggest(self, ctx: Context, args: str) -> list[Result]:
         if not args:
-            return results.help_items()
-        return [results.ask_item(args, ctx.model)]
+            return results.help_items(ctx.t)
+        return [results.ask_item(ctx.t, args, ctx.model)]
 
     def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
         question = data["query"]
@@ -65,15 +71,15 @@ class AskCommand:
         messages.append({"role": "user", "content": question})
         answer = ctx.client().chat(messages, model=ctx.model, max_tokens=ctx.max_tokens)
         history.add_exchange(question, answer)
-        return results.answer_results(answer, ctx.model)
+        return results.answer_results(ctx.t, answer, ctx.model)
 
 
 class ModelCommand:
     def suggest(self, ctx: Context, args: str) -> list[Result]:
         return [
             results.command_item(
-                name="Pick the Mistral model",
-                description=f"Active model: {ctx.model} — press Enter to list models",
+                name=ctx.t("model.pick.name"),
+                description=ctx.t("model.pick.description", model=ctx.model),
                 data={"command": "model"},
             )
         ]
@@ -89,22 +95,22 @@ class SetModelCommand:
 
     def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
         ctx.store.set(_MODEL_STATE_KEY, data["model"])
-        return results.confirmation(f"✓ Active model: {data['model']}")
+        return results.confirmation(ctx.t("model.set", model=data["model"]))
 
 
 class ResetCommand:
     def suggest(self, ctx: Context, args: str) -> list[Result]:
         return [
             results.command_item(
-                name="Clear the conversation history",
-                description="Press Enter to start from a blank conversation",
+                name=ctx.t("reset.name"),
+                description=ctx.t("reset.description"),
                 data={"command": "reset"},
             )
         ]
 
     def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
         ctx.history().clear()
-        return results.confirmation("✓ Conversation history cleared")
+        return results.confirmation(ctx.t("reset.done"))
 
 
 #: Subcommands reachable by typing their name after the keyword.
@@ -136,8 +142,8 @@ def activate(ctx: Context, data: dict[str, Any]) -> list[Result]:
     """Route an activation, with uniform error handling (error item + retry)."""
     command = COMMANDS.get(data.get("command", ""))
     if command is None:
-        return results.help_items()
+        return results.help_items(ctx.t)
     try:
         return command.activate(ctx, data)
     except MistralError as error:
-        return results.error_results(error, retry_data=data)
+        return results.error_results(ctx.t, error, retry_data=data)

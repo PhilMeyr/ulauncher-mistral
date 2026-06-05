@@ -12,6 +12,16 @@
     }
   },
   "preferences": {
+    "language": {
+      "type": "select",
+      "name": "Interface language",
+      "description": "Language of the items shown by the extension (the manifest itself cannot be translated)",
+      "default_value": "en",
+      "options": [
+        { "value": "en", "text": "English" },
+        { "value": "fr", "text": "Français" }
+      ]
+    },
     "api_key": {
       "type": "input",
       "name": "Mistral API key",

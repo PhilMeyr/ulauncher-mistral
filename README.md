@@ -11,6 +11,7 @@
 - **`ai reset`** — clears the conversation history.
 - **Multi-turn conversation** — the last N exchanges (configurable) are sent back as context with every question.
 - **Zero dependencies** — the Mistral API is called with the stdlib (`urllib`), no `pip install` required.
+- **Localized interface** — the items and error messages rendered by the extension are available in English and French ("Interface language" preference). Adding a language = one entry in `ui/strings.py` + one option in `manifest.json`. Note: the preference names in `manifest.json` itself cannot be localized (Ulauncher has no i18n mechanism for extensions).
 
 ## Installation
 
@@ -27,6 +28,7 @@
 
 | Preference | Default | Description |
 |---|---|---|
+| Interface language | English | Language of the extension's items/messages (en/fr) |
 | Mistral API key | — | Required |
 | Default model | `mistral-small-latest` | Overridden by `ai model` |
 | System prompt | "Answer concisely." | Base instructions |
@@ -51,7 +53,8 @@ mistral/client.py    # Mistral REST client (urllib): chat, chat_stream, list_mod
 mistral/conversation.py  # Sliding window of exchanges
 mistral/state.py     # Atomic JSON persistence (XDG_DATA_HOME)
 mistral/formatter.py # Line wrapping + URL extraction
-mistral/errors.py    # Typed exceptions with user-facing messages
+ui/strings.py        # Light i18n layer (en/fr) for all user-facing strings
+mistral/errors.py    # Typed exceptions carrying language-neutral message keys
 ```
 
 The business logic (`mistral/`) never imports Ulauncher; commands depend on the `ChatProvider` protocol, not on the concrete client.

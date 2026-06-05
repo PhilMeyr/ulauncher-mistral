@@ -1,8 +1,8 @@
-"""Centralized `Result` factories (DRY: icons, actions, formatting)."""
+"""Centralized `Result` factories (DRY: icons, actions, formatting, translations)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ulauncher.api.shared.action.ExtensionCustomAction import ExtensionCustomAction
 from ulauncher.internals import effects
@@ -10,6 +10,9 @@ from ulauncher.internals.result import Result
 
 from mistral import formatter
 from mistral.errors import ApiError, ApiKeyMissingError, MistralError
+
+if TYPE_CHECKING:
+    from ui.strings import Translator
 
 ICON = "images/icon.png"
 
@@ -21,10 +24,10 @@ def _copy_effect(text: str) -> dict[str, Any]:
     return {"type": "effect:legacy_copy", "data": text}
 
 
-def ask_item(question: str, model: str) -> Result:
+def ask_item(t: Translator, question: str, model: str) -> Result:
     return command_item(
-        name=f'Ask Mistral: "{question}"',
-        description=f"Press Enter to send — model: {model}",
+        name=t("ask.name", question=question),
+        description=t("ask.description", model=model),
         data={"command": "ask", "query": question},
     )
 
@@ -39,21 +42,21 @@ def command_item(name: str, description: str, data: dict[str, Any]) -> Result:
     )
 
 
-def help_items() -> list[Result]:
+def help_items(t: Translator) -> list[Result]:
     return [
         Result(
-            name="Type your question after the keyword",
-            description="Subcommands: model (pick the model), reset (clear the history)",
+            name=t("help.name"),
+            description=t("help.description"),
             icon=ICON,
         ),
     ]
 
 
-def answer_results(answer: str, model: str) -> list[Result]:
+def answer_results(t: Translator, answer: str, model: str) -> list[Result]:
     """Full answer: copyable header, body line by line, clickable links."""
     results = [
         Result(
-            name=f"Answer ({model}) — press Enter to copy",
+            name=t("answer.header", model=model),
             icon=ICON,
             on_enter=_copy_effect(answer),
         )
@@ -92,16 +95,20 @@ def confirmation(message: str) -> list[Result]:
     return [Result(name=message, icon=ICON, on_enter=effects.close_window())]
 
 
-def error_results(error: MistralError, retry_data: dict[str, Any] | None = None) -> list[Result]:
+def error_results(
+    t: Translator, error: MistralError, retry_data: dict[str, Any] | None = None
+) -> list[Result]:
     """Every error becomes a visible item — never a silent failure."""
-    results = [Result(name="⚠️ Error", description=error.user_message, icon=ICON)]
+    results = [
+        Result(name=t("error.title"), description=t(error.message_key, **error.params), icon=ICON)
+    ]
     if isinstance(error, ApiKeyMissingError) or (
         isinstance(error, ApiError) and error.status == 401
     ):
         results.append(
             Result(
                 compact=True,
-                name="🔑 Open the Mistral console to create/check an API key",
+                name=t("error.open_console"),
                 icon=ICON,
                 on_enter=effects.open(_API_KEYS_URL),
             )
@@ -110,7 +117,7 @@ def error_results(error: MistralError, retry_data: dict[str, Any] | None = None)
         results.append(
             Result(
                 compact=True,
-                name="↻ Retry",
+                name=t("error.retry"),
                 icon=ICON,
                 on_enter=ExtensionCustomAction(retry_data, keep_app_open=True),
             )
