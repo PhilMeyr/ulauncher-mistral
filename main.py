@@ -23,12 +23,14 @@ class MistralExtension(Extension):
     def _file_preferences(self) -> dict[str, Any]:
         """Preferences re-read from the Ulauncher config file.
 
-        TODO: remove this workaround once Ulauncher fixes live preference updates.
+        TODO: remove this workaround once running Ulauncher >= 6.0.0-beta32.
         In v6.0.0-beta31 the app never notifies extensions of preference changes
         (the `update_preferences` handler in extension_mode.py exists but is never
         emitted), and the EXTENSION_PREFERENCES env var is frozen at process start.
-        Once UPDATE_PREFERENCES events are actually delivered, `self.preferences`
-        will stay current on its own and this method can be deleted.
+        Fixed upstream on 2026-05-12 by Ulauncher commits eb1e131 ("emit
+        update_preferences event after saving user prefs") and 0e80ec3, not yet in
+        any release. Once UPDATE_PREFERENCES events are delivered,
+        `self.preferences` stays current on its own and this method can be deleted.
         """
         config_home = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
         path = Path(config_home) / "ulauncher" / "ext_preferences" / f"{self.ext_id}.json"
