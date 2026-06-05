@@ -9,19 +9,25 @@ from ulauncher.internals import effects
 from ulauncher.internals.result import Result
 
 from mistral import formatter
-from mistral.errors import ApiError, ApiKeyMissingError, MistralError
 
 if TYPE_CHECKING:
+    from mistral.errors import MistralError
     from ui.strings import Translator
 
 ICON = "images/icon.png"
 
-_API_KEYS_URL = "https://console.mistral.ai/api-keys"
+#: Ulauncher renders at most 25 results; keep link items within that budget.
+MAX_URL_ITEMS = 5
 
 
 def _copy_effect(text: str) -> dict[str, Any]:
     """Copy-to-clipboard effect (legacy format, still supported in API v3)."""
     return {"type": "effect:legacy_copy", "data": text}
+
+
+def notice(name: str, description: str = "") -> list[Result]:
+    """Single informational item with no action."""
+    return [Result(name=name, description=description, icon=ICON)]
 
 
 def ask_item(t: Translator, question: str, model: str) -> Result:
@@ -43,17 +49,18 @@ def command_item(name: str, description: str, data: dict[str, Any]) -> Result:
 
 
 def help_items(t: Translator) -> list[Result]:
-    return [
-        Result(
-            name=t("help.name"),
-            description=t("help.description"),
-            icon=ICON,
-        ),
-    ]
+    return notice(t("help.name"), t("help.description"))
 
 
-def answer_results(t: Translator, answer: str, model: str, partial: bool = False) -> list[Result]:
-    """Full answer: copyable header, wrapped body, clickable links (links on final only)."""
+def pending_items(t: Translator) -> list[Result]:
+    """Shown when the same question is already waiting for an answer."""
+    return notice(t("ask.pending"), t("ask.pending.description"))
+
+
+def answer_results(
+    t: Translator, answer: str, model: str, partial: bool = False, truncated: bool = False
+) -> list[Result]:
+    """Full answer: copyable header, wrapped body, then clickable links (final only)."""
     header_key = "answer.streaming" if partial else "answer.header"
     results = [
         Result(
@@ -72,8 +79,10 @@ def answer_results(t: Translator, answer: str, model: str, partial: bool = False
                 icon=ICON,
                 on_enter=effects.open(url),
             )
-            for url in formatter.extract_urls(answer)
+            for url in formatter.extract_urls(answer)[:MAX_URL_ITEMS]
         )
+    if truncated:
+        results.extend(notice(t("answer.truncated")))
     return results
 
 
@@ -102,15 +111,13 @@ def error_results(
     results = [
         Result(name=t("error.title"), description=t(error.message_key, **error.params), icon=ICON)
     ]
-    if isinstance(error, ApiKeyMissingError) or (
-        isinstance(error, ApiError) and error.status == 401
-    ):
+    if error.help_url:
         results.append(
             Result(
                 compact=True,
                 name=t("error.open_console"),
                 icon=ICON,
-                on_enter=effects.open(_API_KEYS_URL),
+                on_enter=effects.open(error.help_url),
             )
         )
     if retry_data is not None:

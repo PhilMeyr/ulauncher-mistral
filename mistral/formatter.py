@@ -1,32 +1,41 @@
-"""Formatting of answers for display as Ulauncher items (one line per item)."""
+"""Extraction of safe, clickable URLs from answers (LLM output is untrusted)."""
 
 from __future__ import annotations
 
 import re
-import textwrap
+from urllib.parse import urlsplit
 
-LINE_WIDTH = 90
+# Broad http(s) match: trailing prose punctuation and markdown/bracket closers
+# are trimmed afterwards by _clean_url, so URLs may legitimately contain ()
+# and [] (e.g. https://en.wikipedia.org/wiki/Python_(programming_language)).
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
 
-# http(s) URLs, excluding trailing punctuation and markdown closers.
-_URL_PATTERN = re.compile(r"https?://[^\s<>\)\]]+")
-
-
-def wrap_lines(text: str, width: int = LINE_WIDTH) -> list[str]:
-    """Split the text into short lines, preserving words and paragraphs."""
-    lines: list[str] = []
-    for paragraph in text.splitlines():
-        stripped = paragraph.strip()
-        if not stripped:
-            continue
-        lines.extend(textwrap.wrap(stripped, width=width) or [stripped])
-    return lines
+_TRAILING_PUNCTUATION = ".,;:!?'\""
+_BRACKET_PAIRS = {")": "(", "]": "["}
 
 
 def extract_urls(text: str) -> list[str]:
-    """Unique URLs found in the answer, in order of appearance."""
-    urls: list[str] = []
-    for match in _URL_PATTERN.findall(text):
-        url = match.rstrip(".,;:!?'\"")
-        if url not in urls:
-            urls.append(url)
-    return urls
+    """Unique safe URLs found in the answer, in order of appearance."""
+    cleaned = (_clean_url(match) for match in _URL_PATTERN.findall(text))
+    return list(dict.fromkeys(url for url in cleaned if url and _is_safe(url)))
+
+
+def _clean_url(url: str) -> str:
+    """Trim trailing prose punctuation and unbalanced closing brackets."""
+    url = url.rstrip(_TRAILING_PUNCTUATION)
+    while url and url[-1] in _BRACKET_PAIRS:
+        closer = url[-1]
+        if url.count(_BRACKET_PAIRS[closer]) >= url.count(closer):
+            break  # balanced: the bracket belongs to the URL
+        url = url[:-1].rstrip(_TRAILING_PUNCTUATION)
+    return url
+
+
+def _is_safe(url: str) -> bool:
+    """Reject URLs whose authority embeds userinfo: the displayed label of
+    "https://trusted.com@evil.tld" would be misleading, and the LLM that
+    produced the URL is not a trusted source."""
+    try:
+        return "@" not in urlsplit(url).netloc
+    except ValueError:
+        return False

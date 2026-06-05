@@ -32,9 +32,13 @@ class ConversationHistory:
     def add_exchange(self, question: str, answer: str) -> None:
         if self._max_exchanges <= 0:
             return
-        exchanges: list[list[str]] = self._store.get(_STATE_KEY, [])
-        exchanges.append([question, answer])
-        self._store.set(_STATE_KEY, exchanges[-self._max_exchanges :])
+
+        def append(exchanges: list[list[str]] | None) -> list[list[str]]:
+            # Build a new list: the input may be the StateStore cache (do not mutate).
+            updated = [*(exchanges or []), [question, answer]]
+            return updated[-self._max_exchanges :]
+
+        self._store.update(_STATE_KEY, append)
 
     def clear(self) -> None:
         self._store.set(_STATE_KEY, [])

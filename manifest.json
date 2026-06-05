@@ -7,7 +7,7 @@
   "triggers": {
     "mistral": {
       "name": "Mistral AI",
-      "description": "Ask Mistral AI a question (\"model\" to pick the model, \"reset\" to clear the history)",
+      "description": "Ask Mistral AI a question (\"model\" to pick the model, \"reset\" to clear the history, \"last\" to show the last answer)",
       "default_keyword": "ai"
     }
   },
