@@ -52,28 +52,28 @@ def help_items(t: Translator) -> list[Result]:
     ]
 
 
-def answer_results(t: Translator, answer: str, model: str) -> list[Result]:
-    """Full answer: copyable header, body line by line, clickable links."""
+def answer_results(t: Translator, answer: str, model: str, partial: bool = False) -> list[Result]:
+    """Full answer: copyable header, wrapped body, clickable links (links on final only)."""
+    header_key = "answer.streaming" if partial else "answer.header"
     results = [
         Result(
-            name=t("answer.header", model=model),
+            name=t(header_key, model=model),
             icon=ICON,
             on_enter=_copy_effect(answer),
-        )
+        ),
+        # wrap needs the app-side Result.wrap support; older apps render one ellipsized line
+        Result(compact=True, wrap=True, name=answer, icon=ICON, on_enter=_copy_effect(answer)),
     ]
-    results.extend(
-        Result(compact=True, name=line, icon=ICON, on_enter=_copy_effect(answer))
-        for line in formatter.wrap_lines(answer)
-    )
-    results.extend(
-        Result(
-            compact=True,
-            name=f"🔗 {url}",
-            icon=ICON,
-            on_enter=effects.open(url),
+    if not partial:
+        results.extend(
+            Result(
+                compact=True,
+                name=f"🔗 {url}",
+                icon=ICON,
+                on_enter=effects.open(url),
+            )
+            for url in formatter.extract_urls(answer)
         )
-        for url in formatter.extract_urls(answer)
-    )
     return results
 
 

@@ -17,7 +17,7 @@ class MistralExtension(Extension):
     def on_input(self, query_str: str, trigger_id: str) -> list[Result]:
         return commands.suggest(self._context(), query_str)
 
-    def on_item_enter(self, data: Any) -> list[Result]:
+    def on_item_enter(self, data: Any) -> commands.CommandOutput:
         return commands.activate(self._context(), data)
 
     def _file_preferences(self) -> dict[str, Any]:

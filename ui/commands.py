@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Iterator, Protocol, Union
 
 from mistral.client import MistralClient
 from mistral.conversation import ConversationHistory
@@ -18,6 +19,13 @@ if TYPE_CHECKING:
     from mistral.client import ChatProvider, Message
 
 _MODEL_STATE_KEY = "model"
+
+#: Generators stream partial result lists when the app supports it (Ulauncher PR pending)
+CommandOutput = Union["list[Result]", "Iterator[list[Result]]"]
+
+
+def _streaming_supported() -> bool:
+    return os.environ.get("ULAUNCHER_PARTIAL_RESPONSES") == "1"
 
 
 @dataclass
@@ -54,7 +62,7 @@ class Command(Protocol):
 
     def suggest(self, ctx: Context, args: str) -> list[Result]: ...
 
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]: ...
+    def activate(self, ctx: Context, data: dict[str, Any]) -> CommandOutput: ...
 
 
 class AskCommand:
@@ -63,15 +71,39 @@ class AskCommand:
             return results.help_items(ctx.t)
         return [results.ask_item(ctx.t, args, ctx.model)]
 
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
+    def activate(self, ctx: Context, data: dict[str, Any]) -> CommandOutput:
         question = data["query"]
-        messages: list[Message] = [{"role": "system", "content": ctx.system_prompt}]
-        history = ctx.history()
-        messages += history.as_messages()
-        messages.append({"role": "user", "content": question})
-        answer = ctx.client().chat(messages, model=ctx.model, max_tokens=ctx.max_tokens)
-        history.add_exchange(question, answer)
+        if _streaming_supported():
+            return self._activate_streaming(ctx, question)
+        answer = ctx.client().chat(
+            self._build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
+        )
+        ctx.history().add_exchange(question, answer)
         return results.answer_results(ctx.t, answer, ctx.model)
+
+    def _activate_streaming(self, ctx: Context, question: str) -> Iterator[list[Result]]:
+        """Yield the growing answer as it streams; errors must be handled here because
+        they are raised during iteration, outside the activate() error wrapper."""
+        answer = ""
+        try:
+            deltas = ctx.client().chat_stream(
+                self._build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
+            )
+            for delta in deltas:
+                answer += delta
+                yield results.answer_results(ctx.t, answer, ctx.model, partial=True)
+        except MistralError as error:
+            retry_data = {"command": "ask", "query": question}
+            yield results.error_results(ctx.t, error, retry_data=retry_data)
+            return
+        ctx.history().add_exchange(question, answer)
+        yield results.answer_results(ctx.t, answer, ctx.model)
+
+    def _build_messages(self, ctx: Context, question: str) -> list[Message]:
+        messages: list[Message] = [{"role": "system", "content": ctx.system_prompt}]
+        messages += ctx.history().as_messages()
+        messages.append({"role": "user", "content": question})
+        return messages
 
 
 class ModelCommand:
@@ -138,7 +170,7 @@ def suggest(ctx: Context, query: str) -> list[Result]:
     return DEFAULT_COMMAND.suggest(ctx, stripped)
 
 
-def activate(ctx: Context, data: dict[str, Any]) -> list[Result]:
+def activate(ctx: Context, data: dict[str, Any]) -> CommandOutput:
     """Route an activation, with uniform error handling (error item + retry)."""
     command = COMMANDS.get(data.get("command", ""))
     if command is None:
