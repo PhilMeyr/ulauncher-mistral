@@ -1,13 +1,21 @@
-"""Extension commands (open registry: adding a command = adding a dict entry)."""
+"""Extension commands (open registries: adding a command = adding a dict entry).
+
+Suggesting (while typing) and activating (on Enter) are segregated into two
+registries so a command only implements what it actually does (ISP) — e.g.
+"model:set" is activate-only and needs no suggest stub.
+"""
 
 from __future__ import annotations
 
+import logging
+import os
+import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Union
 
 from mistral.client import MistralClient
 from mistral.conversation import ConversationHistory
-from mistral.errors import MistralError
+from mistral.errors import ApiKeyMissingError, MistralError
 from mistral.state import StateStore
 from ui import results
 from ui.strings import Translator
@@ -15,9 +23,24 @@ from ui.strings import Translator
 if TYPE_CHECKING:
     from ulauncher.internals.result import Result
 
-    from mistral.client import ChatProvider, Message
+    from mistral.client import Message
+
+logger = logging.getLogger(__name__)
 
 _MODEL_STATE_KEY = "model"
+_LAST_ANSWER_STATE_KEY = "last_answer"
+
+#: Generators stream partial result lists when the app supports it (Ulauncher PR pending)
+CommandOutput = Union["list[Result]", "Iterator[list[Result]]"]
+
+#: Questions awaiting a Mistral answer — deduplicates double activations
+#: (each Ulauncher event runs in its own thread of the same process).
+_in_flight: set[str] = set()
+_in_flight_lock = threading.Lock()
+
+
+def _streaming_supported() -> bool:
+    return os.environ.get("ULAUNCHER_PARTIAL_RESPONSES") == "1"
 
 
 @dataclass
@@ -30,120 +53,195 @@ class Context:
     history_size: int
     max_tokens: int
     timeout: int
+    store: StateStore
     language: str = "en"
-    store: StateStore = field(default_factory=StateStore)
+    t: Translator = field(init=False)
 
-    @property
-    def t(self) -> Translator:
-        return Translator(self.language)
+    def __post_init__(self) -> None:
+        self.t = Translator(self.language)
 
     @property
     def model(self) -> str:
         """Active model: the choice made via the "model" command overrides the preference."""
         return self.store.get(_MODEL_STATE_KEY) or self.default_model
 
-    def client(self) -> ChatProvider:
+    def client(self) -> MistralClient:
         return MistralClient(self.api_key, timeout=self.timeout)
 
     def history(self) -> ConversationHistory:
         return ConversationHistory(self.store, self.history_size)
 
 
-class Command(Protocol):
-    """A command suggests items while typing, then executes when activated."""
-
-    def suggest(self, ctx: Context, args: str) -> list[Result]: ...
-
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]: ...
+# -- ask ------------------------------------------------------------------
 
 
-class AskCommand:
-    def suggest(self, ctx: Context, args: str) -> list[Result]:
-        if not args:
-            return results.help_items(ctx.t)
-        return [results.ask_item(ctx.t, args, ctx.model)]
-
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
-        question = data["query"]
-        messages: list[Message] = [{"role": "system", "content": ctx.system_prompt}]
-        history = ctx.history()
-        messages += history.as_messages()
-        messages.append({"role": "user", "content": question})
-        answer = ctx.client().chat(messages, model=ctx.model, max_tokens=ctx.max_tokens)
-        history.add_exchange(question, answer)
-        return results.answer_results(ctx.t, answer, ctx.model)
+def _suggest_ask(ctx: Context, args: str) -> list[Result]:
+    if not ctx.api_key:
+        return results.error_results(ctx.t, ApiKeyMissingError())
+    if not args:
+        return results.help_items(ctx.t)
+    return [results.ask_item(ctx.t, args, ctx.model)]
 
 
-class ModelCommand:
-    def suggest(self, ctx: Context, args: str) -> list[Result]:
-        return [
-            results.command_item(
-                name=ctx.t("model.pick.name"),
-                description=ctx.t("model.pick.description", model=ctx.model),
-                data={"command": "model"},
+def _activate_ask(ctx: Context, data: dict[str, Any]) -> CommandOutput:
+    question = data["query"]
+    if not _begin_request(question):
+        return results.pending_items(ctx.t)
+    if _streaming_supported():
+        return _ask_streaming(ctx, question)  # releases the in-flight marker itself
+    try:
+        answer = ctx.client().chat(
+            _build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
+        )
+        _record_answer(ctx, question, answer.content)
+        return results.answer_results(ctx.t, answer.content, ctx.model, truncated=answer.truncated)
+    finally:
+        _end_request(question)
+
+
+def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
+    """Yield the growing answer as it streams; errors must be handled here because
+    they are raised during iteration, outside the activate() error wrapper."""
+    answer = ""
+    retry_data = {"command": "ask", "query": question}
+    try:
+        try:
+            deltas = ctx.client().chat_stream(
+                _build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
             )
-        ]
+            for delta in deltas:
+                answer += delta
+                yield results.answer_results(ctx.t, answer, ctx.model, partial=True)
+        except MistralError as error:
+            yield results.error_results(ctx.t, error, retry_data=retry_data)
+            return
+        except Exception:
+            logger.exception("Unexpected error while streaming the answer")
+            yield results.error_results(ctx.t, MistralError(), retry_data=retry_data)
+            return
+        _record_answer(ctx, question, answer)
+        yield results.answer_results(ctx.t, answer, ctx.model)
+    finally:
+        _end_request(question)
 
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
-        models = ctx.client().list_models()
-        return results.model_results(models, ctx.model)
+
+def _build_messages(ctx: Context, question: str) -> list[Message]:
+    messages: list[Message] = [{"role": "system", "content": ctx.system_prompt}]
+    messages += ctx.history().as_messages()
+    messages.append({"role": "user", "content": question})
+    return messages
 
 
-class SetModelCommand:
-    def suggest(self, ctx: Context, args: str) -> list[Result]:  # never suggested directly
-        return []
+def _record_answer(ctx: Context, question: str, answer: str) -> None:
+    """Persist the exchange, and the last answer so "last" can re-display it
+    even when Ulauncher drops the response (user typed while waiting)."""
+    ctx.history().add_exchange(question, answer)
+    ctx.store.set(
+        _LAST_ANSWER_STATE_KEY, {"question": question, "answer": answer, "model": ctx.model}
+    )
 
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
-        ctx.store.set(_MODEL_STATE_KEY, data["model"])
-        return results.confirmation(ctx.t("model.set", model=data["model"]))
+
+def _begin_request(question: str) -> bool:
+    """Register the question as in-flight; False if it already is."""
+    with _in_flight_lock:
+        if question in _in_flight:
+            return False
+        _in_flight.add(question)
+        return True
 
 
-class ResetCommand:
-    def suggest(self, ctx: Context, args: str) -> list[Result]:
-        return [
-            results.command_item(
-                name=ctx.t("reset.name"),
-                description=ctx.t("reset.description"),
-                data={"command": "reset"},
-            )
-        ]
+def _end_request(question: str) -> None:
+    with _in_flight_lock:
+        _in_flight.discard(question)
 
-    def activate(self, ctx: Context, data: dict[str, Any]) -> list[Result]:
-        ctx.history().clear()
-        return results.confirmation(ctx.t("reset.done"))
 
+# -- model / reset / last ---------------------------------------------------
+
+
+def _suggest_model(ctx: Context, args: str) -> list[Result]:
+    return [
+        results.command_item(
+            name=ctx.t("model.pick.name"),
+            description=ctx.t("model.pick.description", model=ctx.model),
+            data={"command": "model"},
+        )
+    ]
+
+
+def _activate_model(ctx: Context, data: dict[str, Any]) -> list[Result]:
+    models = ctx.client().list_models()
+    return results.model_results(models, ctx.model)
+
+
+def _activate_set_model(ctx: Context, data: dict[str, Any]) -> list[Result]:
+    ctx.store.set(_MODEL_STATE_KEY, data["model"])
+    return results.confirmation(ctx.t("model.set", model=data["model"]))
+
+
+def _suggest_reset(ctx: Context, args: str) -> list[Result]:
+    return [
+        results.command_item(
+            name=ctx.t("reset.name"),
+            description=ctx.t("reset.description"),
+            data={"command": "reset"},
+        )
+    ]
+
+
+def _activate_reset(ctx: Context, data: dict[str, Any]) -> list[Result]:
+    ctx.history().clear()
+    return results.confirmation(ctx.t("reset.done"))
+
+
+def _suggest_last(ctx: Context, args: str) -> list[Result]:
+    last = ctx.store.get(_LAST_ANSWER_STATE_KEY)
+    if not last:
+        return results.notice(ctx.t("last.empty"))
+    return results.answer_results(ctx.t, last["answer"], last["model"])
+
+
+# -- Registries and routers --------------------------------------------------
+
+SuggestFn = Callable[[Context, str], "list[Result]"]
+ActivateFn = Callable[[Context, "dict[str, Any]"], CommandOutput]
 
 #: Subcommands reachable by typing their name after the keyword.
-SUBCOMMANDS: dict[str, Command] = {
-    "model": ModelCommand(),
-    "reset": ResetCommand(),
+SUGGEST: dict[str, SuggestFn] = {
+    "model": _suggest_model,
+    "reset": _suggest_reset,
+    "last": _suggest_last,
 }
 
 #: Every activatable command (routed by data["command"] in on_item_enter).
-COMMANDS: dict[str, Command] = {
-    "ask": AskCommand(),
-    "model:set": SetModelCommand(),
-    **SUBCOMMANDS,
+ACTIVATE: dict[str, ActivateFn] = {
+    "ask": _activate_ask,
+    "model": _activate_model,
+    "model:set": _activate_set_model,
+    "reset": _activate_reset,
 }
-
-DEFAULT_COMMAND: Command = COMMANDS["ask"]
 
 
 def suggest(ctx: Context, query: str) -> list[Result]:
     """Route typed input: exact subcommand match, or a question by default."""
     stripped = query.strip()
-    command = SUBCOMMANDS.get(stripped.lower())
-    if command is not None:
-        return command.suggest(ctx, "")
-    return DEFAULT_COMMAND.suggest(ctx, stripped)
+    subcommand = SUGGEST.get(stripped.lower())
+    if subcommand is not None:
+        return subcommand(ctx, "")
+    return _suggest_ask(ctx, stripped)
 
 
-def activate(ctx: Context, data: dict[str, Any]) -> list[Result]:
-    """Route an activation, with uniform error handling (error item + retry)."""
-    command = COMMANDS.get(data.get("command", ""))
-    if command is None:
+def activate(ctx: Context, data: dict[str, Any]) -> CommandOutput:
+    """Route an activation, with uniform error handling (error item + retry).
+
+    The framework runs this in a bare thread with no exception handler, so the
+    last-resort except below is what guarantees "never a silent failure"."""
+    handler = ACTIVATE.get(data.get("command", ""))
+    if handler is None:
         return results.help_items(ctx.t)
     try:
-        return command.activate(ctx, data)
+        return handler(ctx, data)
     except MistralError as error:
         return results.error_results(ctx.t, error, retry_data=data)
+    except Exception:
+        logger.exception("Unexpected error while handling %r", data.get("command"))
+        return results.error_results(ctx.t, MistralError(), retry_data=data)

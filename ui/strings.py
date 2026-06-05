@@ -14,9 +14,19 @@ _STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "ask.name": 'Ask Mistral: "{question}"',
         "ask.description": "Press Enter to send — model: {model}",
+        "ask.pending": "Mistral is already answering this question…",
+        "ask.pending.description": 'Hold on — type "last" after the keyword to show the answer',
         "help.name": "Type your question after the keyword",
-        "help.description": "Subcommands: model (pick the model), reset (clear the history)",
+        "help.description": (
+            "Subcommands: model (pick the model), reset (clear the history), "
+            "last (show the last answer)"
+        ),
         "answer.header": "Answer ({model}) — press Enter to copy",
+        "answer.streaming": "Mistral is answering… ({model})",
+        "answer.truncated": (
+            "⚠ Answer cut off by the max tokens limit — raise it in the preferences"
+        ),
+        "last.empty": "No answer to show yet",
         "model.pick.name": "Pick the Mistral model",
         "model.pick.description": "Active model: {model} — press Enter to list models",
         "model.set": "✓ Active model: {model}",
@@ -32,15 +42,28 @@ _STRINGS: dict[str, dict[str, str]] = {
         "error.api_403": "Access denied by the Mistral API (key permissions?).",
         "error.api_429": "Rate limit reached. Try again in a few moments.",
         "error.api_http": "The Mistral API returned HTTP error {status}. {detail}",
+        "error.api_response": "The Mistral API returned an unexpected or truncated response.",
         "error.timeout": "The Mistral API did not respond in time. Retry or increase the timeout.",
         "error.network": "Could not reach the Mistral API. Check your network connection.",
     },
     "fr": {
         "ask.name": "Demander à Mistral : « {question} »",
         "ask.description": "Entrée pour envoyer — modèle : {model}",
+        "ask.pending": "Mistral répond déjà à cette question…",
+        "ask.pending.description": (
+            "Patientez — tapez « last » après le mot-clé pour afficher la réponse"
+        ),
         "help.name": "Tapez votre question après le mot-clé",
-        "help.description": "Sous-commandes : model (choix du modèle), reset (vider l'historique)",
+        "help.description": (
+            "Sous-commandes : model (choix du modèle), reset (vider l'historique), "
+            "last (revoir la dernière réponse)"
+        ),
         "answer.header": "Réponse ({model}) — Entrée pour copier",
+        "answer.streaming": "Mistral répond… ({model})",
+        "answer.truncated": (
+            "⚠ Réponse coupée par la limite max tokens — augmentez-la dans les préférences"
+        ),
+        "last.empty": "Aucune réponse à afficher pour l'instant",
         "model.pick.name": "Choisir le modèle Mistral",
         "model.pick.description": "Modèle actif : {model} — Entrée pour lister les modèles",
         "model.set": "✓ Modèle actif : {model}",
@@ -58,6 +81,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "error.api_403": "Accès refusé par l'API Mistral (permissions de la clé ?).",
         "error.api_429": "Limite de débit atteinte. Réessayez dans quelques instants.",
         "error.api_http": "L'API Mistral a renvoyé une erreur HTTP {status}. {detail}",
+        "error.api_response": "L'API Mistral a renvoyé une réponse inattendue ou tronquée.",
         "error.timeout": (
             "L'API Mistral n'a pas répondu à temps. Réessayez ou augmentez le timeout."
         ),
