@@ -18,8 +18,14 @@
       "description": "Language of the items shown by the extension (the manifest itself cannot be translated)",
       "default_value": "en",
       "options": [
-        { "value": "en", "text": "English" },
-        { "value": "fr", "text": "Français" }
+        {
+          "value": "en",
+          "text": "English"
+        },
+        {
+          "value": "fr",
+          "text": "Français"
+        }
       ]
     },
     "api_key": {
@@ -52,7 +58,8 @@
       "type": "number",
       "name": "Max tokens per answer",
       "default_value": 1024,
-      "min": 1
+      "min": 1,
+      "max": 32768
     },
     "timeout": {
       "type": "number",
