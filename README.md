@@ -2,11 +2,11 @@
 
 [Ulauncher](https://ulauncher.io) extension to query [Mistral AI](https://mistral.ai) straight from the launcher.
 
-> ⚠️ This extension targets **Ulauncher v6 (beta) / Extension API v3** only. It does not work with Ulauncher 5.x.
+> ⚠️ Requires **Ulauncher ≥ 6.0.0-beta35** (Extension API v3). It does not work with Ulauncher 5.x or earlier v6 betas.
 
 ## Features
 
-- **`ai <question>`** — ask Mistral a question. Press Enter on "Ask Mistral" to send (no API call while typing). The answer is rendered as a wrapped item; pressing Enter copies the full answer to the clipboard; URLs found in the answer show up as clickable 🔗 items (after the answer body).
+- **`ai <question>`** — ask Mistral a question. Press Enter on "Ask Mistral" to send (no API call while typing). The answer streams in as it is generated and is rendered as a wrapped item; pressing Enter copies the full answer to the clipboard; URLs found in the answer show up as clickable 🔗 items (after the answer body).
 - **`ai model`** — lists the available models (fetched live via `GET /v1/models`) and persists your choice. The chosen model overrides the "Default model" preference.
 - **`ai reset`** — clears the conversation history.
 - **`ai last`** — shows the last answer again (handy if Ulauncher dropped the rendered answer because you typed while waiting).
@@ -37,23 +37,22 @@
 
 ## Known limitations
 
-- **No answer streaming yet**: Ulauncher's event architecture (including v6 beta31) only allows a single rendered response per activation — the app-side callback is consumed after the first render (`extension_mode.py`). The streaming path is fully implemented (`chat_stream()` SSE client + progressive rendering behind the `ULAUNCHER_PARTIAL_RESPONSES=1` env var) and an upstream Ulauncher PR to support partial responses is planned.
 - Links are not clickable *inside* the text: they are extracted and displayed as dedicated items (capped at 5, Ulauncher renders at most 25 results).
-- Preferences are re-read from Ulauncher's config file (mtime-cached) on every event, as a workaround for a v6 beta31 bug where preference updates are never pushed to running extensions (see the `TODO` in `main.py`).
 
 ## Privacy & security notes
 
 - The API key is stored **in plain text** by Ulauncher itself in `~/.config/ulauncher/ext_preferences/` (platform behaviour — the extension never logs or displays it).
-- The conversation history and the last answer are persisted **in plain text** in Ulauncher's extension state directory (`$XDG_STATE_HOME/ulauncher/ext_state/`, directory created with mode `0700`). Run `ai reset` to clear the history.
+- The conversation history and the last answer are persisted **in plain text** in Ulauncher's extension state directory (`$XDG_STATE_HOME/ulauncher/ext_state/`, file written with mode `0600`). Run `ai reset` to clear the history.
 - URLs found in answers come from LLM output and are therefore untrusted: only `http(s)` URLs are offered, URLs embedding userinfo (`https://trusted@evil`) are dropped, and the full URL is always shown in the item label before you open it.
 
 ## Architecture
 
 ```
 main.py              # MistralExtension: routes Ulauncher callbacks (SRP)
-ui/commands.py       # ask/model/reset/last SUGGEST + ACTIVATE registries (OCP, ISP)
-ui/results.py        # Result factories (DRY)
-mistral/client.py    # Mistral REST client (urllib): chat, chat_stream, list_models
+prefs.py             # Typed preferences, defaults and bounds read from manifest.json
+ui/commands.py       # SUGGEST + ACTIVATE registries, keyed by result action id (OCP, ISP)
+ui/results.py        # Result factories: one action + payload per item (DRY)
+mistral/client.py    # Mistral REST client (urllib): chat_stream (SSE), list_models
 mistral/conversation.py  # Sliding window of exchanges
 mistral/state.py     # Atomic, thread-safe JSON persistence (mtime-cached)
 mistral/formatter.py # Safe URL extraction from answers
@@ -61,12 +60,13 @@ ui/strings.py        # Light i18n layer (en/fr) for all user-facing strings
 mistral/errors.py    # Typed exceptions carrying language-neutral message keys
 ```
 
-The business logic (`mistral/`) never imports Ulauncher. Every transport or parsing failure is translated into a typed `MistralError` at the client boundary, and the command router has a last-resort handler — an error is always rendered as a visible item, never a dead event thread.
+The business logic (`mistral/`) never imports Ulauncher. Every transport or parsing failure is translated into a typed `MistralError` at the client boundary, and the command router has a last-resort handler — an error is always rendered as a visible item, never a silent failure.
 
 ## Development
 
 ```bash
 ruff check . && ruff format .
+python3 -m unittest    # stdlib only; tests/_stubs stands in for the ulauncher package
 # Test without installing:
 ulauncher preview /path/to/ulauncher-mistral
 ```
