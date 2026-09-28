@@ -1,0 +1,1 @@
+EXTENSIONS_STATE = "/nonexistent"

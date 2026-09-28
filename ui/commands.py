@@ -8,21 +8,22 @@ registries so a command only implements what it actually does (ISP) — e.g.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Union
 
+from ulauncher.api import effects
+
 from mistral.client import MistralClient
 from mistral.conversation import ConversationHistory
-from mistral.errors import ApiKeyMissingError, MistralError
+from mistral.errors import ApiKeyMissingError, ApiResponseError, MistralError
 from mistral.state import StateStore
 from ui import results
 from ui.strings import Translator
 
 if TYPE_CHECKING:
-    from ulauncher.internals.result import Result
+    from ulauncher.api import Result
 
     from mistral.client import Message
 
@@ -31,17 +32,12 @@ logger = logging.getLogger(__name__)
 _MODEL_STATE_KEY = "model"
 _LAST_ANSWER_STATE_KEY = "last_answer"
 
-#: Generators stream partial result lists when the app supports it (Ulauncher PR pending)
-CommandOutput = Union["list[Result]", "Iterator[list[Result]]"]
+CommandOutput = Union["list[Result]", "Iterator[list[Result]]", "dict[str, Any]"]
 
 #: Questions awaiting a Mistral answer — deduplicates double activations
 #: (each Ulauncher event runs in its own thread of the same process).
 _in_flight: set[str] = set()
 _in_flight_lock = threading.Lock()
-
-
-def _streaming_supported() -> bool:
-    return os.environ.get("ULAUNCHER_PARTIAL_RESPONSES") == "1"
 
 
 @dataclass
@@ -55,6 +51,7 @@ class Context:
     max_tokens: int
     timeout: int
     store: StateStore
+    copy: Callable[[str], None]
     language: str = "en"
     t: Translator = field(init=False)
 
@@ -84,20 +81,11 @@ def _suggest_ask(ctx: Context, args: str) -> list[Result]:
     return [results.ask_item(ctx.t, args, ctx.model)]
 
 
-def _activate_ask(ctx: Context, data: dict[str, Any]) -> CommandOutput:
-    question = data["query"]
+def _activate_ask(ctx: Context, payload: dict[str, Any]) -> CommandOutput:
+    question = payload["query"]
     if not _begin_request(question):
         return results.pending_items(ctx.t)
-    if _streaming_supported():
-        return _ask_streaming(ctx, question)  # releases the in-flight marker itself
-    try:
-        answer = ctx.client().chat(
-            _build_messages(ctx, question), model=ctx.model, max_tokens=ctx.max_tokens
-        )
-        _record_answer(ctx, question, answer.content)
-        return results.answer_results(ctx.t, answer.content, ctx.model, truncated=answer.truncated)
-    finally:
-        _end_request(question)
+    return _ask_streaming(ctx, question)  # releases the in-flight marker itself
 
 
 def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
@@ -105,7 +93,7 @@ def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
     they are raised during iteration, outside the activate() error wrapper."""
     answer = ""
     truncated = False
-    retry_data = {"command": "ask", "query": question}
+    retry = ("ask", {"query": question})
     try:
         try:
             chunks = ctx.client().chat_stream(
@@ -118,11 +106,14 @@ def _ask_streaming(ctx: Context, question: str) -> Iterator[list[Result]]:
                 answer += chunk.delta
                 yield results.answer_results(ctx.t, answer, ctx.model, partial=True)
         except MistralError as error:
-            yield results.error_results(ctx.t, error, retry_data=retry_data)
+            yield results.error_results(ctx.t, error, retry=retry)
             return
         except Exception:
             logger.exception("Unexpected error while streaming the answer")
-            yield results.error_results(ctx.t, MistralError(), retry_data=retry_data)
+            yield results.error_results(ctx.t, MistralError(), retry=retry)
+            return
+        if not answer:
+            yield results.error_results(ctx.t, ApiResponseError(), retry=retry)
             return
         _record_answer(ctx, question, answer)
         yield results.answer_results(ctx.t, answer, ctx.model, truncated=truncated)
@@ -166,36 +157,35 @@ def _end_request(question: str) -> None:
 def _suggest_model(ctx: Context, args: str) -> list[Result]:
     return [
         results.command_item(
+            ctx.t,
+            "model",
             name=ctx.t("model.pick.name"),
             description=ctx.t("model.pick.description", model=ctx.model),
-            data={"command": "model"},
         )
     ]
 
 
-def _activate_model(ctx: Context, data: dict[str, Any]) -> list[Result]:
+def _activate_model(ctx: Context, payload: dict[str, Any]) -> list[Result]:
     models = ctx.client().list_models()
-    return results.model_results(models, ctx.model)
+    return results.model_results(ctx.t, models, ctx.model)
 
 
-def _activate_set_model(ctx: Context, data: dict[str, Any]) -> list[Result]:
-    ctx.store.set(_MODEL_STATE_KEY, data["model"])
-    return results.confirmation(ctx.t("model.set", model=data["model"]))
+def _activate_set_model(ctx: Context, payload: dict[str, Any]) -> list[Result]:
+    ctx.store.set(_MODEL_STATE_KEY, payload["model"])
+    return results.confirmation(ctx.t, ctx.t("model.set", model=payload["model"]))
 
 
 def _suggest_reset(ctx: Context, args: str) -> list[Result]:
     return [
         results.command_item(
-            name=ctx.t("reset.name"),
-            description=ctx.t("reset.description"),
-            data={"command": "reset"},
+            ctx.t, "reset", name=ctx.t("reset.name"), description=ctx.t("reset.description")
         )
     ]
 
 
-def _activate_reset(ctx: Context, data: dict[str, Any]) -> list[Result]:
+def _activate_reset(ctx: Context, payload: dict[str, Any]) -> list[Result]:
     ctx.history().clear()
-    return results.confirmation(ctx.t("reset.done"))
+    return results.confirmation(ctx.t, ctx.t("reset.done"))
 
 
 def _suggest_last(ctx: Context, args: str) -> list[Result]:
@@ -204,6 +194,22 @@ def _suggest_last(ctx: Context, args: str) -> list[Result]:
     if not answer:  # never stored, or corrupted/hand-edited state file
         return results.notice(ctx.t("last.empty"))
     return results.answer_results(ctx.t, answer, last.get("model", ctx.model))
+
+
+# -- copy / open / close ------------------------------------------------------
+
+
+def _activate_copy(ctx: Context, payload: dict[str, Any]) -> dict[str, Any]:
+    ctx.copy(payload["text"])
+    return effects.close_window()
+
+
+def _activate_open(ctx: Context, payload: dict[str, Any]) -> dict[str, Any]:
+    return effects.open(payload["url"])
+
+
+def _activate_close(ctx: Context, payload: dict[str, Any]) -> dict[str, Any]:
+    return effects.close_window()
 
 
 # -- Registries and routers --------------------------------------------------
@@ -218,12 +224,15 @@ SUGGEST: dict[str, SuggestFn] = {
     "last": _suggest_last,
 }
 
-#: Every activatable command (routed by data["command"] in on_item_enter).
+#: Every result action (keyed by the action id set in ui/results.py).
 ACTIVATE: dict[str, ActivateFn] = {
     "ask": _activate_ask,
     "model": _activate_model,
     "model:set": _activate_set_model,
     "reset": _activate_reset,
+    "copy": _activate_copy,
+    "open": _activate_open,
+    "close": _activate_close,
 }
 
 
@@ -231,19 +240,16 @@ def _guarded(
     ctx: Context,
     label: str,
     run: Callable[[], CommandOutput],
-    retry_data: dict[str, Any] | None = None,
+    retry: tuple[str, dict[str, Any]] | None = None,
 ) -> CommandOutput:
-    """Last resort: every exception becomes a visible error item.
-
-    The framework runs both routers in a bare thread with no exception handler,
-    so this single wrapper is what guarantees "never a silent failure"."""
+    """Every exception becomes a visible error item, where Ulauncher would only log it."""
     try:
         return run()
     except MistralError as error:
-        return results.error_results(ctx.t, error, retry_data=retry_data)
+        return results.error_results(ctx.t, error, retry=retry)
     except Exception:
         logger.exception("Unexpected error while %s", label)
-        return results.error_results(ctx.t, MistralError(), retry_data=retry_data)
+        return results.error_results(ctx.t, MistralError(), retry=retry)
 
 
 def _route_suggest(ctx: Context, query: str) -> list[Result]:
@@ -261,11 +267,14 @@ def suggest(ctx: Context, query: str) -> list[Result]:
     return _guarded(ctx, "suggesting", lambda: _route_suggest(ctx, query))
 
 
-def activate(ctx: Context, data: dict[str, Any]) -> CommandOutput:
-    """Route an activation, with uniform error handling (error item + retry)."""
-    handler = ACTIVATE.get(data.get("command", ""))
+def activate(ctx: Context, action_id: str, payload: dict[str, Any]) -> CommandOutput:
+    """Route a result action, with uniform error handling (error item + retry)."""
+    handler = ACTIVATE.get(action_id)
     if handler is None:
         return results.help_items(ctx.t)
     return _guarded(
-        ctx, f"handling {data.get('command')!r}", lambda: handler(ctx, data), retry_data=data
+        ctx,
+        f"handling {action_id!r}",
+        lambda: handler(ctx, payload),
+        retry=(action_id, payload),
     )
