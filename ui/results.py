@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ulauncher.api.shared.action.ExtensionCustomAction import ExtensionCustomAction
-from ulauncher.internals import effects
-from ulauncher.internals.result import Result
+from ulauncher.api import Result
 
 from mistral import formatter
 
@@ -20,9 +18,14 @@ ICON = "images/icon.png"
 MAX_URL_ITEMS = 5
 
 
-def _copy_effect(text: str) -> dict[str, Any]:
-    """Copy-to-clipboard effect (legacy format, still supported in API v3)."""
-    return {"type": "effect:legacy_copy", "data": text}
+def _actionable(t: Translator, action_id: str, payload: dict[str, Any], **fields: Any) -> Result:
+    """Item routed to `commands.activate(action_id, payload)` on Enter."""
+    return Result(
+        icon=ICON,
+        actions={action_id: {"name": t(f"action.{action_id}")}},
+        payload=payload,
+        **fields,
+    )
 
 
 def notice(name: str, description: str = "") -> list[Result]:
@@ -31,21 +34,18 @@ def notice(name: str, description: str = "") -> list[Result]:
 
 
 def ask_item(t: Translator, question: str, model: str) -> Result:
-    return command_item(
+    return _actionable(
+        t,
+        "ask",
+        {"query": question},
         name=t("ask.name", question=question),
         description=t("ask.description", model=model),
-        data={"command": "ask", "query": question},
     )
 
 
-def command_item(name: str, description: str, data: dict[str, Any]) -> Result:
-    """Item that triggers an extension command when activated."""
-    return Result(
-        name=name,
-        description=description,
-        icon=ICON,
-        on_enter=ExtensionCustomAction(data, keep_app_open=True),
-    )
+def command_item(t: Translator, action_id: str, name: str, description: str) -> Result:
+    """Item that triggers a payload-less extension command when activated."""
+    return _actionable(t, action_id, {}, name=name, description=description)
 
 
 def help_items(t: Translator) -> list[Result]:
@@ -62,23 +62,14 @@ def answer_results(
 ) -> list[Result]:
     """Full answer: copyable header, wrapped body, then clickable links (final only)."""
     header_key = "answer.streaming" if partial else "answer.header"
+    copy = {"text": answer}
     results = [
-        Result(
-            name=t(header_key, model=model),
-            icon=ICON,
-            on_enter=_copy_effect(answer),
-        ),
-        # wrap needs the app-side Result.wrap support; older apps render one ellipsized line
-        Result(compact=True, wrap=True, name=answer, icon=ICON, on_enter=_copy_effect(answer)),
+        _actionable(t, "copy", copy, name=t(header_key, model=model)),
+        _actionable(t, "copy", copy, compact=True, wrap=True, name=answer),
     ]
     if not partial:
         results.extend(
-            Result(
-                compact=True,
-                name=f"🔗 {url}",
-                icon=ICON,
-                on_enter=effects.open(url),
-            )
+            _actionable(t, "open", {"url": url}, compact=True, name=f"🔗 {url}")
             for url in formatter.extract_urls(answer)[:MAX_URL_ITEMS]
         )
     if truncated:
@@ -86,47 +77,41 @@ def answer_results(
     return results
 
 
-def model_results(models: list[str], active: str) -> list[Result]:
+def model_results(t: Translator, models: list[str], active: str) -> list[Result]:
     return [
-        Result(
+        _actionable(
+            t,
+            "model:set",
+            {"model": model},
             compact=True,
             name=f"{'●' if model == active else '○'} {model}",
-            icon=ICON,
-            on_enter=ExtensionCustomAction(
-                {"command": "model:set", "model": model}, keep_app_open=True
-            ),
         )
         for model in models
     ]
 
 
-def confirmation(message: str) -> list[Result]:
-    return [Result(name=message, icon=ICON, on_enter=effects.close_window())]
+def confirmation(t: Translator, message: str) -> list[Result]:
+    return [_actionable(t, "close", {}, name=message)]
 
 
 def error_results(
-    t: Translator, error: MistralError, retry_data: dict[str, Any] | None = None
+    t: Translator,
+    error: MistralError,
+    retry: tuple[str, dict[str, Any]] | None = None,
 ) -> list[Result]:
-    """Every error becomes a visible item — never a silent failure."""
+    """Every error becomes a visible item — never a silent failure.
+
+    `retry` is the (action_id, payload) that failed; re-activating it retries."""
     results = [
         Result(name=t("error.title"), description=t(error.message_key, **error.params), icon=ICON)
     ]
     if error.help_url:
         results.append(
-            Result(
-                compact=True,
-                name=t("error.open_console"),
-                icon=ICON,
-                on_enter=effects.open(error.help_url),
+            _actionable(
+                t, "open", {"url": error.help_url}, compact=True, name=t("error.open_console")
             )
         )
-    if retry_data is not None:
-        results.append(
-            Result(
-                compact=True,
-                name=t("error.retry"),
-                icon=ICON,
-                on_enter=ExtensionCustomAction(retry_data, keep_app_open=True),
-            )
-        )
+    if retry is not None:
+        action_id, payload = retry
+        results.append(_actionable(t, action_id, payload, compact=True, name=t("error.retry")))
     return results

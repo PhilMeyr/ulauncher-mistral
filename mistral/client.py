@@ -26,18 +26,11 @@ API_BASE = "https://api.mistral.ai/v1"
 Message = dict[str, str]  # {"role": ..., "content": ...}
 
 
-class ChatAnswer(NamedTuple):
-    """Answer returned by `chat`, with the truncation fact the UI may surface."""
-
-    content: str
-    truncated: bool  # the API stopped at max_tokens (finish_reason == "length")
-
-
 class StreamChunk(NamedTuple):
-    """One SSE chunk from `chat_stream`; `truncated` mirrors `ChatAnswer.truncated`."""
+    """One SSE chunk from `chat_stream`."""
 
     delta: str
-    truncated: bool  # this chunk carried finish_reason == "length"
+    truncated: bool  # the API stopped at max_tokens (finish_reason == "length")
 
 
 @contextmanager
@@ -78,17 +71,6 @@ class MistralClient:
         self._timeout = timeout
 
     # -- Public API ---------------------------------------------------------
-
-    def chat(self, messages: list[Message], model: str, max_tokens: int) -> ChatAnswer:
-        payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
-        data = self._request_json("POST", "/chat/completions", payload)
-        with _translating_errors():
-            choice = data["choices"][0]
-            content = choice["message"]["content"]
-            finish_reason = choice.get("finish_reason")
-        if not content:
-            raise ApiResponseError
-        return ChatAnswer(content=content, truncated=finish_reason == "length")
 
     def chat_stream(
         self, messages: list[Message], model: str, max_tokens: int
